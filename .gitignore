@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+odc-data/
+odc-reports/
+sbom.json
