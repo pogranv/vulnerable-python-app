@@ -1,0 +1,63 @@
+stages:
+  - build    # Стадия генерации
+  - security # Стадия анализа
+
+# Настройки кэширования, чтобы pip работал быстрее
+cache:
+  paths:
+    - .cache/pip
+
+# Генерация SBOM
+generate_sbom:
+  stage: build
+  image: python:3.9
+  script:
+    - pip install -r requirements.txt
+    - pip install cyclonedx-bom
+    - cyclonedx-py environment --output-format json > sbom.json
+    - echo "SBOM generated successfully."
+  artifacts:
+    paths:
+      - sbom.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Отправка в Dependency Track
+upload_to_dependency_track:
+  stage: security
+  image: curlimages/curl:latest
+  needs: ["generate_sbom"]
+  script:
+    - echo "Uploading SBOM to Dependency Track..."
+    - |
+      curl -X POST "$DEP_TRACK_URL/api/v1/bom" \
+      -H "Content-Type: multipart/form-data" \
+      -H "X-Api-Key: $DEP_TRACK_API_KEY" \
+      -F "autoCreate=true" \
+      -F "projectName=Vulnerable-App-CI" \
+      -F "projectVersion=$CI_COMMIT_SHORT_SHA" \
+      -F "bom=@sbom.json"
+  allow_failure: true # Чтобы пайплайн не падал, если сервер недоступен
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Запуск Dependency Check
+dependency_check_scan:
+  stage: security
+  image:
+    name: owasp/dependency-check:latest
+    entrypoint: [""]
+  needs: ["generate_sbom"]
+  script:
+    - /usr/share/dependency-check/bin/dependency-check.sh --scan ./sbom.json --format "HTML" --project "GitLab Scan" --out ./report
+  artifacts:
+    paths:
+      - report/dependency-check-report.html
+    expire_in: 1 week
+    when: always
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
