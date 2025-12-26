@@ -21,11 +21,12 @@ jobs:
           python-version: '3.9'
 
       # Генерируем SBOM
-      - name: Install dependencies and generate SBOM
+      - name: Generate SBOM
         run: |
-          pip install -r requirements.txt
           pip install cyclonedx-bom
-          cyclonedx-py environment --output-format json > sbom.json
+          # Используем команду requirements вместо environment, чтобы не устанавливать старые пакеты,
+          # а просто читать список
+          cyclonedx-py requirements --output-format json --output-file sbom.json requirements.txt
           echo "SBOM generated."
 
       # Отправляем SBOM в Dependency Track
