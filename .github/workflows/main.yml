@@ -1,0 +1,67 @@
+name: SCA Security Scan
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  security-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      # Забираем код
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Настраиваем Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # Генерируем SBOM
+      - name: Install dependencies and generate SBOM
+        run: |
+          pip install -r requirements.txt
+          pip install cyclonedx-bom
+          cyclonedx-py environment --output-format json > sbom.json
+          echo "SBOM generated."
+
+      # Отправляем SBOM в Dependency Track
+      - name: Upload SBOM to Dependency Track
+        env:
+          API_KEY: ${{ secrets.DEP_TRACK_API_KEY }}
+          API_URL: ${{ secrets.DEP_TRACK_URL }}
+        run: |
+          curl -X POST "$API_URL/api/v1/bom" \
+          -H "Content-Type: multipart/form-data" \
+          -H "X-Api-Key: $API_KEY" \
+          -F "autoCreate=true" \
+          -F "projectName=GitHub-CI-Project" \
+          -F "projectVersion=${{ github.sha }}" \
+          -F "bom=@sbom.json"
+
+      # Запускаем Dependency Check
+      - name: Run OWASP Dependency Check
+        run: |
+          mkdir report
+          chmod 777 report
+          docker run --rm \
+            -v ${{ github.workspace }}:/src \
+            -v ${{ github.workspace }}/report:/report \
+            owasp/dependency-check:latest \
+            --scan /src \
+            --format "HTML" \
+            --project "GitHub Actions Scan" \
+            --enableExperimental \
+            --exclude "**/venv/**" \
+            --out /report
+
+      # Сохраняем отчет
+      - name: Upload Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: report/dependency-check-report.html
+          retention-days: 7
